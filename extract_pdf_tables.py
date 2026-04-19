@@ -262,7 +262,7 @@ if __name__ == "__main__":
 
     if not tables:
         print("No tables found.", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(0)
 
     if args.output:
         with open(args.output, "w", newline="", encoding="utf-8") as f:
