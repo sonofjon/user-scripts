@@ -48,10 +48,7 @@ def parse_table_settings(settings_str):
     for pair in settings_str.split(","):
         key, sep, value = pair.partition("=")
         if not sep:
-            raise ValueError(
-                f"Invalid setting"
-                f" (expected key=value): {pair!r}"
-            )
+            raise ValueError(f"Invalid setting (expected key=value): {pair!r}")
         key = key.strip()
         value = value.strip()
         # Convert numeric values
@@ -83,10 +80,7 @@ def parse_page_range(pages_str, total_pages):
         # Single page number
         page = int(pages_str)
         if page < 1 or page > total_pages:
-            raise ValueError(
-                f"Page {page} out of range"
-                f" (1-{total_pages})"
-            )
+            raise ValueError(f"Page {page} out of range (1-{total_pages})")
         return page, page
 
     parts = pages_str.split("-", 1)
@@ -94,20 +88,11 @@ def parse_page_range(pages_str, total_pages):
     end = int(parts[1]) if parts[1] else total_pages
 
     if start < 1 or start > total_pages:
-        raise ValueError(
-            f"Start page {start} out of range"
-            f" (1-{total_pages})"
-        )
+        raise ValueError(f"Start page {start} out of range (1-{total_pages})")
     if end < 1 or end > total_pages:
-        raise ValueError(
-            f"End page {end} out of range"
-            f" (1-{total_pages})"
-        )
+        raise ValueError(f"End page {end} out of range (1-{total_pages})")
     if start > end:
-        raise ValueError(
-            f"Start page {start} is after"
-            f" end page {end}"
-        )
+        raise ValueError(f"Start page {start} is after end page {end}")
 
     return start, end
 
@@ -177,9 +162,7 @@ def extract_tables(pdf, start_page, end_page, table_settings=None):
         page_tables = page.extract_tables(table_settings)
         for table in page_tables:
             # Filter out empty rows
-            rows = [
-                row for row in table if any(cell and cell.strip() for cell in row)
-            ]
+            rows = [row for row in table if any(cell and cell.strip() for cell in row)]
             if rows:
                 tables.append(
                     {
@@ -260,9 +243,7 @@ if __name__ == "__main__":
         total_pages = len(pdf.pages)
 
         if args.pages:
-            start_page, end_page = parse_page_range(
-                args.pages, total_pages
-            )
+            start_page, end_page = parse_page_range(args.pages, total_pages)
         else:
             start_page = 1
             end_page = total_pages
