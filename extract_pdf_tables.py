@@ -16,8 +16,7 @@ Arguments:
         17-    (page 17 to end)
         -85    (start to page 85)
         Omit to extract all pages.
-    -t, --merge-tables: Merge tables that span multiple pages into a
-        single table.
+    -t, --merge-tables: Merge tables that span multiple pages.
     -s, --table-settings: pdfplumber table settings as
         comma-separated key=value pairs.
         Example: -s snap_x_tolerance=5,join_x_tolerance=3
@@ -116,14 +115,8 @@ def merge_cross_page_tables(tables):
         first_row = table["rows"][0]
         prev_header = merged[-1]["rows"][0]
         # Normalize for comparison
-        first_row_clean = [
-            (cell.strip() if cell else "")
-            for cell in first_row
-        ]
-        header_clean = [
-            (cell.strip() if cell else "")
-            for cell in prev_header
-        ]
+        first_row_clean = [(cell.strip() if cell else "") for cell in first_row]
+        header_clean = [(cell.strip() if cell else "") for cell in prev_header]
         if first_row_clean == header_clean:
             # New table (has header): keep as separate table
             merged.append(table)
@@ -134,8 +127,7 @@ def merge_cross_page_tables(tables):
     return merged
 
 
-def extract_tables(pdf_path, start_page, end_page,
-                   table_settings=None):
+def extract_tables(pdf_path, start_page, end_page, table_settings=None):
     """Extract tables using pdfplumber's extract_tables().
 
     Args:
@@ -157,17 +149,15 @@ def extract_tables(pdf_path, start_page, end_page,
             for table in page_tables:
                 # Filter out empty rows
                 rows = [
-                    row for row in table
-                    if any(
-                        cell and cell.strip()
-                        for cell in row
-                    )
+                    row for row in table if any(cell and cell.strip() for cell in row)
                 ]
                 if rows:
-                    tables.append({
-                        "page": page_num,
-                        "rows": rows,
-                    })
+                    tables.append(
+                        {
+                            "page": page_num,
+                            "rows": rows,
+                        }
+                    )
     return tables
 
 
@@ -185,15 +175,10 @@ def write_tables(tables, output):
     for i, table in enumerate(tables):
         if i > 0:
             output.write("\n")
-        output.write(
-            f"# Table {i + 1} (page {table['page']})\n"
-        )
+        output.write(f"# Table {i + 1} (page {table['page']})\n")
         for row in table["rows"]:
             # Replace None with empty string
-            cleaned = [
-                cell.strip() if cell else ""
-                for cell in row
-            ]
+            cleaned = [cell.strip() if cell else "" for cell in row]
             writer.writerow(cleaned)
 
 
@@ -207,19 +192,19 @@ def main():
         help="Path to the PDF file",
     )
     parser.add_argument(
-        "--pages", "-p",
-        help=(
-            "Page range: 17-85, 17- (to end),"
-            " -85 (from start)"
-        ),
+        "--pages",
+        "-p",
+        help=("Page range: 17-85, 17- (to end), -85 (from start)"),
     )
     parser.add_argument(
-        "--merge-tables", "-t",
+        "--merge-tables",
+        "-t",
         action="store_true",
-        help="Merge tables that span multiple pages into a single table",
+        help="Merge tables that span multiple pages",
     )
     parser.add_argument(
-        "--table-settings", "-s",
+        "--table-settings",
+        "-s",
         help=(
             "pdfplumber table settings as comma-separated"
             " key=value pairs, e.g."
@@ -227,7 +212,8 @@ def main():
         ),
     )
     parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         help="Output file path (default: stdout)",
     )
     args = parser.parse_args()
@@ -237,9 +223,7 @@ def main():
         total_pages = len(pdf.pages)
 
     if args.pages:
-        start_page, end_page = parse_page_range(
-            args.pages, total_pages
-        )
+        start_page, end_page = parse_page_range(args.pages, total_pages)
     else:
         start_page = 1
         end_page = total_pages
@@ -247,13 +231,13 @@ def main():
     # Parse pdfplumber table settings
     table_settings = None
     if args.table_settings:
-        table_settings = parse_table_settings(
-            args.table_settings
-        )
+        table_settings = parse_table_settings(args.table_settings)
 
     # Extract tables
     tables = extract_tables(
-        args.pdf_file, start_page, end_page,
+        args.pdf_file,
+        start_page,
+        end_page,
         table_settings=table_settings,
     )
 
@@ -266,12 +250,10 @@ def main():
         sys.exit(1)
 
     if args.output:
-        with open(args.output, "w", newline="",
-                  encoding="utf-8") as f:
+        with open(args.output, "w", newline="", encoding="utf-8") as f:
             write_tables(tables, f)
         print(
-            f"Extracted {len(tables)} tables to"
-            f" {args.output}",
+            f"Extracted {len(tables)} tables to {args.output}",
             file=sys.stderr,
         )
     else:
