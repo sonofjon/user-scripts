@@ -8,7 +8,7 @@ Usage:
     Requires pdftotext on PATH (poppler-utils).
 
     python extract_pdf_text_tables.py <pdf_file>
-        --header-pattern REGEX
+        --header-pattern COL1,COL2,...
         [-p PAGES] [--end-pattern REGEX]
         [-m] [--page-break-pattern REGEX]
         [-o FILE] [-d]
@@ -382,6 +382,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--header-pattern",
         required=True,
+        metavar="COL1,COL2,...",
         help=(
             "Comma-separated list of column heading regexes"
             " (one per column). Use '\\,' to embed a literal"
