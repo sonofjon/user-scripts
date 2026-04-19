@@ -16,7 +16,7 @@ Arguments:
         17-    (page 17 to end)
         -85    (start to page 85)
         Omit to extract all pages.
-    -t, --merge-tables: Merge tables that span multiple pages.
+    -t, --merge-tables: Merge tables that are split across page boundaries.
     -s, --table-settings: pdfplumber table settings as
         comma-separated key=value pairs.
         Example: -s snap_x_tolerance=5,join_x_tolerance=3
@@ -86,8 +86,8 @@ def parse_page_range(pages_str, total_pages):
     return start, end
 
 
-def merge_cross_page_tables(tables):
-    """Merge tables that span across page boundaries.
+def merge_split_tables(tables):
+    """Merge tables that are split across page boundaries.
 
     Detects continuation tables by comparing each table's first
     row to the previous table's header. A table whose first row
@@ -240,9 +240,9 @@ if __name__ == "__main__":
         table_settings=table_settings,
     )
 
-    # Merge tables that span across page boundaries
+    # Merge tables that are split across page boundaries
     if args.merge_tables:
-        tables = merge_cross_page_tables(tables)
+        tables = merge_split_tables(tables)
 
     if not tables:
         print("No tables found.", file=sys.stderr)
