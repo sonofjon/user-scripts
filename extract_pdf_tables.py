@@ -16,7 +16,9 @@ Arguments:
         17-    (page 17 to end)
         -85    (start to page 85)
         Omit to extract all pages.
-    -t, --merge-tables: Merge tables that are split across page boundaries.
+    -t, --merge-tables: Merge tables that are split across page
+        boundaries. Only works when all tables in the document
+        share the same header row.
     -s, --table-settings: pdfplumber table settings as
         comma-separated key=value pairs.
         Example: -s snap_x_tolerance=5,join_x_tolerance=3
@@ -89,16 +91,15 @@ def parse_page_range(pages_str, total_pages):
 def merge_split_tables(tables):
     """Merge tables that are split across page boundaries.
 
-    Detects continuation tables by comparing each table's first
-    row to the previous table's header. A table whose first row
-    matches the previous table's header is treated as a new
-    table. A table whose first row does not match is treated as
-    a continuation of the previous table, and its rows are
-    appended.
+    When a table is split across a page boundary, the continuation
+    on the next page does not repeat the header row. This function
+    detects continuation tables by comparing each table's first
+    row to the previous table's header. A matching first row
+    indicates a new table; a non-matching first row indicates a
+    continuation, and its rows are appended to the previous table.
 
-    Limitation: a table with a first row that differs from the
-    previous table's header is always treated as a continuation,
-    even if it is a genuinely separate table.
+    Assumes all tables in the document share the same header row.
+    Tables with different headers will be incorrectly merged.
 
     Args:
         tables: List of table dicts with 'page' and 'rows' keys.
@@ -199,7 +200,11 @@ if __name__ == "__main__":
         "--merge-tables",
         "-t",
         action="store_true",
-        help="Merge tables that span multiple pages",
+        help=(
+            "Merge tables that are split across page"
+            " boundaries. Only works when all tables"
+            " share the same header row"
+        ),
     )
     parser.add_argument(
         "--table-settings",
