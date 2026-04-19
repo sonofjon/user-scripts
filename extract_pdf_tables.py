@@ -182,8 +182,7 @@ def write_tables(tables, output):
             writer.writerow(cleaned)
 
 
-def main():
-    """Parse arguments and run table extraction."""
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Extract tables from a PDF file",
     )
@@ -264,7 +263,3 @@ def main():
             f"Extracted {len(tables)} tables",
             file=sys.stderr,
         )
-
-
-if __name__ == "__main__":
-    main()
