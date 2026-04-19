@@ -183,7 +183,7 @@ def write_tables(tables, output):
         tables: List of table dicts from extract_tables().
         output: File object to write to.
     """
-    writer = csv.writer(output)
+    writer = csv.writer(output, lineterminator="\n")
     for i, table in enumerate(tables):
         if i > 0:
             output.write("\n")
