@@ -113,6 +113,11 @@ def parse_page_range(pages_str, total_pages):
     return start, end
 
 
+def clean_cell(cell):
+    """Return the cell stripped of whitespace, or empty string."""
+    return cell.strip() if cell else ""
+
+
 def merge_split_tables(tables):
     """Merge tables that are split across page boundaries.
 
@@ -141,8 +146,8 @@ def merge_split_tables(tables):
         first_row = table["rows"][0]
         prev_header = merged[-1]["rows"][0]
         # Normalize for comparison
-        first_row_clean = [(cell.strip() if cell else "") for cell in first_row]
-        header_clean = [(cell.strip() if cell else "") for cell in prev_header]
+        first_row_clean = [clean_cell(cell) for cell in first_row]
+        header_clean = [clean_cell(cell) for cell in prev_header]
         if first_row_clean == header_clean:
             # New table (has header): keep as separate table
             merged.append(table)
@@ -203,7 +208,7 @@ def write_tables(tables, output):
         output.write(f"# Table {i + 1} (page {table['page']})\n")
         for row in table["rows"]:
             # Replace None with empty string
-            cleaned = [cell.strip() if cell else "" for cell in row]
+            cleaned = [clean_cell(cell) for cell in row]
             writer.writerow(cleaned)
 
 
