@@ -150,7 +150,7 @@ def build_header_regex(column_patterns):
         re.Pattern: Compiled regex.
     """
     grouped = [f"({p})" for p in column_patterns]
-    return re.compile(r"\s*".join(grouped))
+    return re.compile(r"\s+".join(grouped))
 
 
 def find_columns(match):
