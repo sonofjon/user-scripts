@@ -27,7 +27,6 @@ Arguments:
 
 import argparse
 import csv
-import io
 import sys
 
 import pdfplumber
@@ -292,9 +291,7 @@ if __name__ == "__main__":
             file=sys.stderr,
         )
     else:
-        output = io.StringIO()
-        write_tables(tables, output)
-        print(output.getvalue(), end="")
+        write_tables(tables, sys.stdout)
         print(
             f"Extracted {len(tables)} tables",
             file=sys.stderr,
