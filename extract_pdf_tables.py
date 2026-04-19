@@ -4,19 +4,10 @@ Reads pages, extracts tables with borders, and writes each table
 to stdout in CSV format separated by a blank line and a table
 header comment.
 
-Two extraction methods are available:
-- tables (default): Uses pdfplumber's extract_tables().
-- geometry: Uses cell bounding box geometry to determine the true
-  row structure from the first column's cell boundaries.
-
-Optional post-processing:
-- Table merging (-t): Merges tables that span across page
-  boundaries by detecting continuation tables without a header.
-
 Usage:
     pip install pdfplumber
-    python extract_pdf_tables.py <pdf_file> [-p PAGES] [-m METHOD]
-                                 [-t] [-s SETTINGS]
+    python extract_pdf_tables.py <pdf_file> [-p PAGES] [-t]
+                                 [-s SETTINGS]
                                  [-o FILE]
 
 Arguments:
@@ -26,9 +17,8 @@ Arguments:
         17-    (page 17 to end)
         -85    (start to page 85)
         Omit to extract all pages.
-    -m, --method: Extraction method: "tables" (default) or
-        "geometry".
-    -t, --merge-tables: Merge cross-page tables.
+    -t, --merge-tables: Combine tables that span multiple
+        pages into a single table.
     -s, --table-settings: pdfplumber table settings as
         comma-separated key=value pairs. Example:
         -s snap_x_tolerance=5,join_x_tolerance=3
@@ -145,78 +135,7 @@ def merge_cross_page_tables(tables):
     return merged
 
 
-def build_rows_from_cells(page, table):
-    """Extract table rows using cell bounding box geometry.
-
-    Uses the first column's cell boundaries to determine the true
-    row structure. Each first-column cell spans the full height of
-    its logical row. All cells whose y-range falls within a
-    first-column cell's y-range are grouped into that row, and
-    multi-line text within a cell is joined with a space.
-
-    Args:
-        page: A pdfplumber Page object.
-        table: A pdfplumber Table object.
-
-    Returns:
-        list: List of rows, each a list of cell text strings.
-    """
-    cells = table.cells
-    if not cells:
-        return []
-
-    # Find unique x boundaries (column edges) sorted left to right
-    x_edges = sorted(set(
-        x for cell in cells for x in (cell[0], cell[2])
-    ))
-
-    # Find unique y boundaries for the first column to
-    # determine logical rows
-    first_col_x0 = x_edges[0]
-    first_col_x1 = x_edges[1] if len(x_edges) > 1 else None
-
-    # Collect first-column cells (their y-ranges define rows)
-    row_boundaries = []
-    for cell in cells:
-        x0, y0, x1, y1 = cell
-        if (abs(x0 - first_col_x0) < 1
-                and (first_col_x1 is None
-                     or abs(x1 - first_col_x1) < 1)):
-            row_boundaries.append((y0, y1))
-
-    # Sort by y position (top to bottom)
-    row_boundaries.sort(key=lambda r: r[0])
-
-    # Determine column positions from x_edges
-    col_ranges = list(zip(x_edges[:-1], x_edges[1:]))
-
-    # Build rows: for each logical row, collect text from all
-    # cells that fall within its y-range, grouped by column
-    rows = []
-    for row_y0, row_y1 in row_boundaries:
-        row = []
-        for col_x0, col_x1 in col_ranges:
-            # Find all cells in this row/column intersection
-            cell_texts = []
-            for cell in cells:
-                cx0, cy0, cx1, cy1 = cell
-                # Cell belongs to this column if it overlaps
-                # horizontally
-                if cx0 >= col_x0 - 1 and cx1 <= col_x1 + 1:
-                    # Cell belongs to this row if it overlaps
-                    # vertically
-                    if cy0 >= row_y0 - 1 and cy1 <= row_y1 + 1:
-                        crop = page.within_bbox(cell)
-                        text = crop.extract_text() or ""
-                        if text.strip():
-                            cell_texts.append(text.strip())
-            row.append(" ".join(cell_texts))
-        rows.append(row)
-
-    return rows
-
-
-def extract_tables_default(pdf_path, start_page, end_page,
+def extract_tables(pdf_path, start_page, end_page,
                            table_settings=None):
     """Extract tables using pdfplumber's extract_tables().
 
@@ -244,44 +163,6 @@ def extract_tables_default(pdf_path, start_page, end_page,
                         cell and cell.strip()
                         for cell in row
                     )
-                ]
-                if rows:
-                    tables.append({
-                        "page": page_num,
-                        "rows": rows,
-                    })
-    return tables
-
-
-def extract_tables_geometry(pdf_path, start_page, end_page,
-                            table_settings=None):
-    """Extract tables using cell geometry approach.
-
-    Uses cell bounding boxes to determine the true row structure,
-    avoiding false row splits from multi-line cells.
-
-    Args:
-        pdf_path: Path to the PDF file.
-        start_page: First page to extract (1-based, inclusive).
-        end_page: Last page to extract (1-based, inclusive).
-        table_settings: Optional dict of pdfplumber table
-            settings passed to find_tables().
-
-    Returns:
-        list: List of dicts, each with keys 'page' (1-based page
-            number) and 'rows' (list of lists of cell values).
-    """
-    tables = []
-    with pdfplumber.open(pdf_path) as pdf:
-        for page_num in range(start_page, end_page + 1):
-            page = pdf.pages[page_num - 1]
-            page_tables = page.find_tables(table_settings)
-            for table in page_tables:
-                rows = build_rows_from_cells(page, table)
-                # Filter out empty rows
-                rows = [
-                    row for row in rows
-                    if any(cell.strip() for cell in row)
                 ]
                 if rows:
                     tables.append({
@@ -334,14 +215,6 @@ def main():
         ),
     )
     parser.add_argument(
-        "--method", "-m",
-        choices=["tables", "geometry"],
-        default="tables",
-        help=(
-            "Extraction method: tables (default) or geometry"
-        ),
-    )
-    parser.add_argument(
         "--merge-tables", "-t",
         action="store_true",
         help="Merge cross-page tables",
@@ -379,17 +252,11 @@ def main():
             args.table_settings
         )
 
-    # Extract tables using selected method
-    if args.method == "geometry":
-        tables = extract_tables_geometry(
-            args.pdf_file, start_page, end_page,
-            table_settings=table_settings,
-        )
-    elif args.method == "tables":
-        tables = extract_tables_default(
-            args.pdf_file, start_page, end_page,
-            table_settings=table_settings,
-        )
+    # Extract tables
+    tables = extract_tables(
+        args.pdf_file, start_page, end_page,
+        table_settings=table_settings,
+    )
 
     # Merge tables that span across page boundaries
     if args.merge_tables:
