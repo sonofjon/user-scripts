@@ -7,8 +7,7 @@ header comment.
 Usage:
     pip install pdfplumber
     python extract_pdf_tables.py <pdf_file> [-p PAGES] [-t]
-                                 [-s SETTINGS]
-                                 [-o FILE]
+                                 [-s SETTINGS] [-o FILE]
 
 Arguments:
     pdf_file: Path to the PDF file.
@@ -17,11 +16,11 @@ Arguments:
         17-    (page 17 to end)
         -85    (start to page 85)
         Omit to extract all pages.
-    -t, --merge-tables: Combine tables that span multiple
-        pages into a single table.
+    -t, --merge-tables: Merge tables that span multiple pages into a
+        single table.
     -s, --table-settings: pdfplumber table settings as
-        comma-separated key=value pairs. Example:
-        -s snap_x_tolerance=5,join_x_tolerance=3
+        comma-separated key=value pairs.
+        Example: -s snap_x_tolerance=5,join_x_tolerance=3
     -o, --output: Output file path. If omitted, writes to stdout.
 """
 
@@ -136,7 +135,7 @@ def merge_cross_page_tables(tables):
 
 
 def extract_tables(pdf_path, start_page, end_page,
-                           table_settings=None):
+                   table_settings=None):
     """Extract tables using pdfplumber's extract_tables().
 
     Args:
@@ -217,7 +216,7 @@ def main():
     parser.add_argument(
         "--merge-tables", "-t",
         action="store_true",
-        help="Merge cross-page tables",
+        help="Merge tables that span multiple pages into a single table",
     )
     parser.add_argument(
         "--table-settings", "-s",
