@@ -268,12 +268,12 @@ if __name__ == "__main__":
         with open(args.output, "w", newline="", encoding="utf-8") as f:
             write_tables(tables, f)
         print(
-            f"Extracted {len(tables)} tables to {args.output}",
+            f"Extracted {len(tables)} table(s) to {args.output}",
             file=sys.stderr,
         )
     else:
         write_tables(tables, sys.stdout)
         print(
-            f"Extracted {len(tables)} tables",
+            f"Extracted {len(tables)} table(s)",
             file=sys.stderr,
         )
