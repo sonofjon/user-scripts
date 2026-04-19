@@ -6,7 +6,7 @@ header comment.
 
 Usage:
     pip install pdfplumber
-    python extract_pdf_tables.py <pdf_file> [-p PAGES] [-t]
+    python extract_pdf_tables.py <pdf_file> [-p PAGES] [-m]
                                  [-s SETTINGS] [-o FILE]
 
 Arguments:
@@ -16,7 +16,7 @@ Arguments:
         17-    (page 17 to end)
         -85    (start to page 85)
         Omit to extract all pages.
-    -t, --merge-tables: Merge tables that are split across page
+    -m, --merge-tables: Merge tables that are split across page
         boundaries. Only works when all tables in the document
         share the same header row.
     -s, --table-settings: pdfplumber table settings as
@@ -49,7 +49,10 @@ def parse_table_settings(settings_str):
     for pair in settings_str.split(","):
         key, sep, value = pair.partition("=")
         if not sep:
-            continue
+            raise ValueError(
+                f"Invalid setting"
+                f" (expected key=value): {pair!r}"
+            )
         key = key.strip()
         value = value.strip()
         # Convert numeric values
@@ -80,11 +83,33 @@ def parse_page_range(pages_str, total_pages):
     if "-" not in pages_str:
         # Single page number
         page = int(pages_str)
+        if page < 1 or page > total_pages:
+            raise ValueError(
+                f"Page {page} out of range"
+                f" (1-{total_pages})"
+            )
         return page, page
 
     parts = pages_str.split("-", 1)
     start = int(parts[0]) if parts[0] else 1
     end = int(parts[1]) if parts[1] else total_pages
+
+    if start < 1 or start > total_pages:
+        raise ValueError(
+            f"Start page {start} out of range"
+            f" (1-{total_pages})"
+        )
+    if end < 1 or end > total_pages:
+        raise ValueError(
+            f"End page {end} out of range"
+            f" (1-{total_pages})"
+        )
+    if start > end:
+        raise ValueError(
+            f"Start page {start} is after"
+            f" end page {end}"
+        )
+
     return start, end
 
 
@@ -128,11 +153,11 @@ def merge_split_tables(tables):
     return merged
 
 
-def extract_tables(pdf_path, start_page, end_page, table_settings=None):
+def extract_tables(pdf, start_page, end_page, table_settings=None):
     """Extract tables using pdfplumber's extract_tables().
 
     Args:
-        pdf_path: Path to the PDF file.
+        pdf: An open pdfplumber.PDF object.
         start_page: First page to extract (1-based, inclusive).
         end_page: Last page to extract (1-based, inclusive).
         table_settings: Optional dict of pdfplumber table
@@ -143,22 +168,21 @@ def extract_tables(pdf_path, start_page, end_page, table_settings=None):
             number) and 'rows' (list of lists of cell values).
     """
     tables = []
-    with pdfplumber.open(pdf_path) as pdf:
-        for page_num in range(start_page, end_page + 1):
-            page = pdf.pages[page_num - 1]
-            page_tables = page.extract_tables(table_settings)
-            for table in page_tables:
-                # Filter out empty rows
-                rows = [
-                    row for row in table if any(cell and cell.strip() for cell in row)
-                ]
-                if rows:
-                    tables.append(
-                        {
-                            "page": page_num,
-                            "rows": rows,
-                        }
-                    )
+    for page_num in range(start_page, end_page + 1):
+        page = pdf.pages[page_num - 1]
+        page_tables = page.extract_tables(table_settings)
+        for table in page_tables:
+            # Filter out empty rows
+            rows = [
+                row for row in table if any(cell and cell.strip() for cell in row)
+            ]
+            if rows:
+                tables.append(
+                    {
+                        "page": page_num,
+                        "rows": rows,
+                    }
+                )
     return tables
 
 
@@ -198,7 +222,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--merge-tables",
-        "-t",
+        "-m",
         action="store_true",
         help=(
             "Merge tables that are split across page"
@@ -222,28 +246,30 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    # Determine page range
-    with pdfplumber.open(args.pdf_file) as pdf:
-        total_pages = len(pdf.pages)
-
-    if args.pages:
-        start_page, end_page = parse_page_range(args.pages, total_pages)
-    else:
-        start_page = 1
-        end_page = total_pages
-
     # Parse pdfplumber table settings
     table_settings = None
     if args.table_settings:
         table_settings = parse_table_settings(args.table_settings)
 
-    # Extract tables
-    tables = extract_tables(
-        args.pdf_file,
-        start_page,
-        end_page,
-        table_settings=table_settings,
-    )
+    with pdfplumber.open(args.pdf_file) as pdf:
+        # Determine page range
+        total_pages = len(pdf.pages)
+
+        if args.pages:
+            start_page, end_page = parse_page_range(
+                args.pages, total_pages
+            )
+        else:
+            start_page = 1
+            end_page = total_pages
+
+        # Extract tables
+        tables = extract_tables(
+            pdf,
+            start_page,
+            end_page,
+            table_settings=table_settings,
+        )
 
     # Merge tables that are split across page boundaries
     if args.merge_tables:
