@@ -42,7 +42,7 @@ def parse_table_settings(settings_str):
 
     Args:
         settings_str: Comma-separated key=value pairs, e.g.
-            "snap_x_tolerance=5,join_x_tolerance=3".
+            'snap_x_tolerance=5,join_x_tolerance=3'.
 
     Returns:
         dict: Parsed settings.
@@ -70,7 +70,7 @@ def parse_table_settings(settings_str):
 def parse_page_range(pages_str, total_pages):
     """Parse a page range string into start and end page numbers.
 
-    Supports formats: "17-85", "17-", "-85". All values are
+    Supports formats: '17-85', '17-', '-85'. All values are
     1-based and inclusive.
 
     Args:
@@ -151,14 +151,14 @@ def merge_split_tables(tables):
 
 
 def extract_tables(pdf, start_page, end_page, table_settings=None):
-    """Extract tables using pdfplumber's extract_tables().
+    """Extract tables using pdfplumber's ``extract_tables()``.
 
     Args:
         pdf: An open pdfplumber.PDF object.
         start_page: First page to extract (1-based, inclusive).
         end_page: Last page to extract (1-based, inclusive).
         table_settings: Optional dict of pdfplumber table
-            settings passed to extract_tables().
+            settings passed to ``extract_tables()``.
 
     Returns:
         list: List of dicts, each with keys 'page' (1-based page
@@ -193,7 +193,7 @@ def report_header_variants(tables, output):
     groups also list the 1-based table indexes that carry that header.
 
     Args:
-        tables: List of table dicts from extract_tables().
+        tables: List of table dicts from ``extract_tables()``.
         output: File object to write to.
     """
     groups = {}
@@ -224,7 +224,7 @@ def write_tables(tables, output):
     and table index, and separated by a blank line.
 
     Args:
-        tables: List of table dicts from extract_tables().
+        tables: List of table dicts from ``extract_tables()``.
         output: File object to write to.
     """
     writer = csv.writer(output, lineterminator="\n")
