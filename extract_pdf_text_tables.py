@@ -420,7 +420,7 @@ if __name__ == "__main__":
         "--debug",
         "-d",
         action="store_true",
-        help=("Print header matches and derived column positions to stderr"),
+        help="Print header matches and derived column positions to stderr",
     )
     args = parser.parse_args()
 

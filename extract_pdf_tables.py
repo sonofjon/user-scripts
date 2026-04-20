@@ -243,7 +243,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--pages",
         "-p",
-        help=("Page range: 17-85, 17- (to end), -85 (from start)"),
+        help="Page range: 17-85, 17- (to end), -85 (from start)",
     )
     parser.add_argument(
         "--merge-tables",
@@ -273,7 +273,7 @@ if __name__ == "__main__":
         "--debug",
         "-d",
         action="store_true",
-        help=("Print header-variant summary to stderr at the end of the run"),
+        help="Print header-variant summary to stderr at the end of the run",
     )
     args = parser.parse_args()
 
