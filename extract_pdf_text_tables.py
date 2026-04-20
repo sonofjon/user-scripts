@@ -2,7 +2,8 @@
 
 Runs ``pdftotext -layout`` on the PDF, then parses tables by locating header
 lines and slicing subsequent data rows at header-derived character-column
-positions.
+positions. All tables in the PDF must have the same column names and order,
+as a single --header-pattern identifies all table headers.
 
 Usage:
     Requires pdftotext on PATH (poppler-utils).
