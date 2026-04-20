@@ -164,7 +164,11 @@ def extract_tables(pdf, start_page, end_page, table_settings=None):
         page_tables = page.extract_tables(table_settings)
         for table in page_tables:
             # Filter out empty rows
-            rows = [row for row in table if any(cell and cell.strip() for cell in row)]
+            rows = [
+                row
+                for row in table
+                if any(cell and cell.strip() for cell in row)
+            ]
             if rows:
                 tables.append(
                     {

@@ -456,7 +456,9 @@ if __name__ == "__main__":
 
     if args.output:
         with Path(args.output).open(
-            "w", newline="", encoding="utf-8",
+            "w",
+            newline="",
+            encoding="utf-8",
         ) as f:
             write_tables(tables, f)
         print(
