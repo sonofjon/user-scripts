@@ -275,9 +275,13 @@ def parse_tables(
             column positions to stderr.
 
     Returns:
-        list: List of table dicts with keys 'page' and 'rows'.
+        tuple: (tables, unmerged_count) where tables is a list of
+            table dicts with keys 'page' and 'rows', and
+            unmerged_count is the number of tables that could not
+            be merged due to missing header on continuation page.
     """
     tables = []
+    unmerged_count = 0
     current_table = None
     current_cols = None
     # pdftotext emits \n before each \f, so splitting on "\n\f"
@@ -299,6 +303,33 @@ def parse_tables(
                 current_table = None
                 current_cols = None
             skipping_page_break = merge_tables
+            if merge_tables and current_table is not None:
+                # Column positions can change between pages. Pre-scan
+                # this continuation page for its first header and use
+                # those positions for all data on this page, including
+                # the continuation rows that precede the header.
+                header_found = False
+                for scan_line in lines:
+                    scan_match = header_pattern.search(scan_line)
+                    if scan_match:
+                        current_cols = find_columns(scan_match)
+                        header_found = True
+                        if debug:
+                            print(
+                                f"[debug] pre-scan updated columns on"
+                                f" page {page_num} to"
+                                f" {current_cols}",
+                                file=sys.stderr,
+                            )
+                        break
+                if not header_found:
+                    # Cannot determine column positions for the
+                    # continuation: output the table as-is without
+                    # merging.
+                    tables.append(current_table)
+                    current_table = None
+                    current_cols = None
+                    unmerged_count += 1
         else:
             skipping_page_break = False
 
@@ -356,7 +387,7 @@ def parse_tables(
     if current_table is not None:
         tables.append(current_table)
 
-    return tables
+    return tables, unmerged_count
 
 
 def write_tables(tables, output):
@@ -452,7 +483,7 @@ if __name__ == "__main__":
         start_page, end_page = 1, None
 
     text = run_pdftotext(args.pdf_file, start_page, end_page)
-    tables = parse_tables(
+    tables, unmerged_count = parse_tables(
         text,
         header_pattern=header_pattern,
         end_pattern=end_pattern,
@@ -481,5 +512,11 @@ if __name__ == "__main__":
         write_tables(tables, sys.stdout)
         print(
             f"Extracted {len(tables)} table(s)",
+            file=sys.stderr,
+        )
+    if unmerged_count:
+        print(
+            f"Warning: {unmerged_count} table(s) could not be merged"
+            " (no header found on continuation page).",
             file=sys.stderr,
         )
