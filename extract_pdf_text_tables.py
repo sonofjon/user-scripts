@@ -41,6 +41,12 @@ Arguments:
         stdout.
     -d, --debug: Print header matches and derived column
         positions to stderr.
+
+Known limitations:
+    Blank lines end the current table. If a PDF contains blank lines
+    inside a table, any rows following such a blank are silently
+    dropped. There is no generic way to distinguish a blank that ends
+    the table from one that appears inside it.
 """
 
 import argparse
