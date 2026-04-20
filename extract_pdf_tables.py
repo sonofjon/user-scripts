@@ -7,7 +7,7 @@ header comment.
 Usage:
     pip install pdfplumber
     python extract_pdf_tables.py <pdf_file> [-p PAGES] [-m]
-                                 [-s SETTINGS] [-o FILE]
+                                 [-s SETTINGS] [-o FILE] [-d]
 
 Arguments:
     pdf_file: Path to the PDF file.
@@ -23,6 +23,8 @@ Arguments:
         comma-separated key=value pairs.
         Example: -s snap_x_tolerance=5,join_x_tolerance=3
     -o, --output: Output file path. If omitted, writes to stdout.
+    -d, --debug: Print header-variant summary to stderr at the
+        end of the run.
 """
 
 import argparse
@@ -173,6 +175,38 @@ def extract_tables(pdf, start_page, end_page, table_settings=None):
     return tables
 
 
+def report_header_variants(tables, output):
+    """Write a summary of distinct header rows to a file object.
+
+    Groups tables by header row and writes one line per variant to
+    output. The largest group is shown with its count only; smaller
+    groups also list the 1-based table indexes that carry that header.
+
+    Args:
+        tables: List of table dicts from extract_tables().
+        output: File object to write to.
+    """
+    groups = {}
+    for i, table in enumerate(tables):
+        header = tuple(clean_cell(cell) for cell in table["rows"][0])
+        if not header:
+            continue
+        groups.setdefault(header, []).append(i + 1)
+
+    # Sort by group size descending; ties broken by header tuple
+    ordered = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+
+    output.write("[debug] Header variants:\n")
+    for rank, (header, indexes) in enumerate(ordered):
+        cells = ", ".join(repr(cell) for cell in header)
+        prefix = f"[debug]   {len(header)} cols [{cells}]: "
+        if rank == 0:
+            output.write(f"{prefix}{len(indexes)} tables\n")
+        else:
+            joined = ", ".join(str(i) for i in indexes)
+            output.write(f"{prefix}tables {joined}\n")
+
+
 def write_tables(tables, output):
     """Write extracted tables to a file object in CSV format.
 
@@ -231,6 +265,12 @@ if __name__ == "__main__":
         "-o",
         help="Output file path (default: stdout)",
     )
+    parser.add_argument(
+        "--debug",
+        "-d",
+        action="store_true",
+        help=("Print header-variant summary to stderr at the end of the run"),
+    )
     args = parser.parse_args()
 
     # Parse pdfplumber table settings
@@ -256,6 +296,10 @@ if __name__ == "__main__":
             table_settings=table_settings,
         )
 
+    # Keep a reference to the raw tables so --debug can report
+    # sub-tables that would otherwise be absorbed by the merge
+    raw_tables = tables
+
     # Merge tables that are split across page boundaries
     if args.merge_tables:
         tables = merge_split_tables(tables)
@@ -277,3 +321,6 @@ if __name__ == "__main__":
             f"Extracted {len(tables)} table(s)",
             file=sys.stderr,
         )
+
+    if args.debug:
+        report_header_variants(raw_tables, sys.stderr)
