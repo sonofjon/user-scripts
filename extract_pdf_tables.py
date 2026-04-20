@@ -30,6 +30,7 @@ Arguments:
 import argparse
 import csv
 import sys
+from pathlib import Path
 
 import pdfplumber
 
@@ -50,7 +51,8 @@ def parse_table_settings(settings_str):
     for pair in settings_str.split(","):
         key, sep, value = pair.partition("=")
         if not sep:
-            raise ValueError(f"Invalid setting (expected key=value): {pair!r}")
+            msg = f"Invalid setting (expected key=value): {pair!r}"
+            raise ValueError(msg)
         key = key.strip()
         value = value.strip()
         # Convert numeric values
@@ -82,7 +84,8 @@ def parse_page_range(pages_str, total_pages):
         # Single page number
         page = int(pages_str)
         if page < 1 or page > total_pages:
-            raise ValueError(f"Page {page} out of range (1-{total_pages})")
+            msg = f"Page {page} out of range (1-{total_pages})"
+            raise ValueError(msg)
         return page, page
 
     parts = pages_str.split("-", 1)
@@ -90,11 +93,14 @@ def parse_page_range(pages_str, total_pages):
     end = int(parts[1]) if parts[1] else total_pages
 
     if start < 1 or start > total_pages:
-        raise ValueError(f"Start page {start} out of range (1-{total_pages})")
+        msg = f"Start page {start} out of range (1-{total_pages})"
+        raise ValueError(msg)
     if end < 1 or end > total_pages:
-        raise ValueError(f"End page {end} out of range (1-{total_pages})")
+        msg = f"End page {end} out of range (1-{total_pages})"
+        raise ValueError(msg)
     if start > end:
-        raise ValueError(f"Start page {start} is after end page {end}")
+        msg = f"Start page {start} is after end page {end}"
+        raise ValueError(msg)
 
     return start, end
 
@@ -313,7 +319,9 @@ if __name__ == "__main__":
         sys.exit(0)
 
     if args.output:
-        with open(args.output, "w", newline="", encoding="utf-8") as f:
+        with Path(args.output).open(
+            "w", newline="", encoding="utf-8",
+        ) as f:
             write_tables(tables, f)
         print(
             f"Extracted {len(tables)} table(s) to {args.output}",
