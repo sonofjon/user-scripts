@@ -96,7 +96,15 @@ def run_pdftotext(pdf_file, start_page, end_page):
     if end_page is not None:
         cmd.extend(["-l", str(end_page)])
     cmd.extend([pdf_file, "-"])
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, check=True
+        )
+    except subprocess.CalledProcessError as e:
+        msg = f"pdftotext failed (exit {e.returncode})"
+        if e.stderr:
+            msg += f":\n{e.stderr.strip()}"
+        raise RuntimeError(msg) from e
     return result.stdout
 
 
