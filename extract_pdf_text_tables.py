@@ -44,10 +44,17 @@ Arguments:
         positions to stderr.
 
 Known limitations:
-    Blank lines end the current table. If a PDF contains blank lines
-    inside a table, any rows following such a blank are silently
-    dropped. There is no generic way to distinguish a blank that ends
-    the table from one that appears inside it.
+    1. Blank lines end the current table. If a PDF contains blank lines
+       inside a table, any rows following such a blank are silently
+       dropped. There is no generic way to distinguish a blank that ends the
+       table from one that appears inside it.
+    2. When --merge-tables is used, column positions for continuation rows
+       are inferred from the first header found on the continuation page,
+       which belongs to a different table. Since pdftotext may render
+       different tables at different character positions, the inferred
+       positions may not match the continuation rows, causing values to be
+       cut at wrong column boundaries and possibly end up in the wrong
+       cells, wholly or partially.
 """
 
 import argparse
