@@ -112,7 +112,10 @@ def run_pdftotext(pdf_file, start_page, end_page):
     cmd.extend([pdf_file, "-"])
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, check=True
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
         )
     except subprocess.CalledProcessError as e:
         msg = f"pdftotext failed (exit {e.returncode})"
