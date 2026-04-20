@@ -280,7 +280,11 @@ def parse_tables(
     tables = []
     current_table = None
     current_cols = None
-    pages = text.split("\f")
+    # pdftotext emits \n before each \f, so splitting on "\n\f"
+    # avoids a spurious trailing blank line per page that would
+    # falsely close an open table. If a PDF ever omits the \n
+    # before \f, use text.split("\f") instead.
+    pages = text.split("\n\f")
 
     for page_offset, page_text in enumerate(pages):
         page_num = start_page + page_offset
