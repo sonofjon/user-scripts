@@ -5,6 +5,13 @@ lines and slicing subsequent data rows at header-derived character-column
 positions. All tables in the PDF must have the same column names and order,
 as a single --header-pattern identifies all table headers.
 
+pdftotext -layout sometimes emits blank lines within a table (e.g. when a
+row has an empty second line). Since a blank line normally ends the current
+table, these would cause the remaining rows to be silently dropped. To avoid
+this, blank lines are not treated as table terminators if the next non-blank
+line looks like a table row, as determined by a gaps test and a whitespace
+ratio test (see --row-gaps and --row-ratio).
+
 Usage:
     Requires pdftotext on PATH (poppler-utils).
 
@@ -13,6 +20,8 @@ Usage:
         [-p PAGES] [--end-pattern REGEX]
         [-m] [--page-break-pattern REGEX]
         [-o FILE] [-d]
+        [--row-gaps N M] [--no-row-gaps]
+        [--row-ratio R] [--no-row-ratio]
 
 Arguments:
     pdf_file: Path to the PDF file.
@@ -42,13 +51,22 @@ Arguments:
         stdout.
     -d, --debug: Print header matches and derived column
         positions to stderr.
+    --row-gaps N M: Minimum number of inter-word gaps and minimum gap
+        length (in spaces) for gaps-based table row detection. A
+        non-blank line after a blank is kept in the table if it contains
+        at least N runs of M or more consecutive spaces between
+        non-whitespace tokens (leading and trailing whitespace ignored).
+        Use --no-row-gaps to disable. (default: 3 3)
+    --no-row-gaps: Disable the gaps-based table row shape test.
+    --row-ratio R: Minimum interior whitespace ratio for ratio-based
+        table row detection. A non-blank line after a blank is kept in
+        the table if the fraction of its interior characters (leading and
+        trailing whitespace stripped) that are spaces is at least R.
+        Use --no-row-ratio to disable. (default: 0.30)
+    --no-row-ratio: Disable the ratio-based table row shape test.
 
 Known limitations:
-    1. Blank lines end the current table. If a PDF contains blank lines
-       inside a table, any rows following such a blank are silently
-       dropped. There is no generic way to distinguish a blank that ends the
-       table from one that appears inside it.
-    2. When --merge-tables is used, column positions for continuation rows
+    1. When --merge-tables is used, column positions for continuation rows
        are inferred from the first header found on the continuation page,
        which belongs to a different table. Since pdftotext may render
        different tables at different character positions, the inferred
@@ -237,6 +255,47 @@ def is_blank_line(line):
     return not line.strip()
 
 
+def _looks_like_table_row(line, row_gaps, row_ratio):
+    """Return True if line looks like a table data row by shape.
+
+    Uses two independent shape tests, either of which is sufficient
+    (OR logic). Leading and trailing whitespace are ignored in both
+    tests. If both row_gaps and row_ratio are None, returns False so
+    that any blank line ends the table.
+
+    Args:
+        line: The line to check.
+        row_gaps: Tuple (min_gaps, min_gap_len) for the gaps test, or
+            None to skip the test. A line passes if it contains at
+            least min_gaps runs of min_gap_len or more consecutive
+            spaces between non-whitespace tokens.
+        row_ratio: Minimum interior whitespace ratio for the ratio
+            test, or None to skip the test. A line passes if the
+            fraction of its interior characters that are spaces is at
+            least this value.
+
+    Returns:
+        bool: True if the line looks like a table row.
+    """
+    if not line.strip():
+        return False
+    interior = line.strip()
+    if row_gaps is not None:
+        min_gaps, min_gap_len = row_gaps
+        gaps = [
+            len(run)
+            for run in re.findall(r" +", interior)
+            if len(run) >= min_gap_len
+        ]
+        if len(gaps) >= min_gaps:
+            return True
+    if row_ratio is not None:
+        n_spaces = sum(1 for c in interior if c == " ")
+        if n_spaces / len(interior) >= row_ratio:
+            return True
+    return False
+
+
 def merge_continuation(prev_row, cells):
     """Append non-empty cells onto the previous row's cells.
 
@@ -266,15 +325,20 @@ def parse_tables(
     merge_tables=False,
     page_break_pattern=None,
     start_page=1,
+    row_gaps=(3, 3),
+    row_ratio=0.30,
     debug=False,
 ):
     """Parse tables from pdftotext layout output.
 
     Scans the text line by line. A match against ``header_pattern`` starts a
     new table and defines its column starts. Subsequent lines become data
-    rows, sliced at those column starts. A table ends at a blank line, at the
-    next header match, at a line matching ``end_pattern``, or (when
-    ``merge_tables`` is False) at a page break.
+    rows, sliced at those column starts. A table ends at the next header
+    match, at a line matching ``end_pattern``, or (when ``merge_tables`` is
+    False) at a page break. When a blank line is encountered inside a table,
+    it is buffered and the next non-blank line is tested with
+    ``_looks_like_table_row``. If the test passes the blank is skipped and
+    the table continues; otherwise the blank closes the table.
 
     Args:
         text: Output of pdftotext -layout.
@@ -288,6 +352,10 @@ def parse_tables(
             matching it are skipped after a page break. Only
             applied when ``merge_tables`` is True.
         start_page: 1-based page number of the first page.
+        row_gaps: Tuple (min_gaps, min_gap_len) for the gaps
+            shape test, or None to disable it.
+        row_ratio: Minimum interior whitespace ratio for the
+            ratio shape test, or None to disable it.
         debug: If True, prints header matches and derived
             column positions to stderr.
 
@@ -301,6 +369,7 @@ def parse_tables(
     unmerged_count = 0
     current_table = None
     current_cols = None
+    buffered_blank = False
     # pdftotext emits \n before each \f, so splitting on "\n\f"
     # avoids a spurious trailing blank line per page that would
     # falsely close an open table. If a PDF ever omits the \n
@@ -319,6 +388,7 @@ def parse_tables(
                 tables.append(current_table)
                 current_table = None
                 current_cols = None
+                buffered_blank = False
             skipping_page_break = merge_tables
             if merge_tables and current_table is not None:
                 # Column positions can change between pages. Pre-scan
@@ -346,6 +416,7 @@ def parse_tables(
                     tables.append(current_table)
                     current_table = None
                     current_cols = None
+                    buffered_blank = False
                     unmerged_count += 1
         else:
             skipping_page_break = False
@@ -365,6 +436,7 @@ def parse_tables(
             if match:
                 if current_table is not None:
                     tables.append(current_table)
+                buffered_blank = False
                 col_starts = find_columns(match)
                 if debug:
                     print(
@@ -381,19 +453,29 @@ def parse_tables(
                 continue
 
             if current_table is None:
+                buffered_blank = False
                 continue
 
             if is_blank_line(line):
-                tables.append(current_table)
-                current_table = None
-                current_cols = None
+                buffered_blank = True
                 continue
 
             if end_pattern is not None and end_pattern.search(line):
                 tables.append(current_table)
                 current_table = None
                 current_cols = None
+                buffered_blank = False
                 continue
+
+            if buffered_blank:
+                buffered_blank = False
+                if not _looks_like_table_row(line, row_gaps, row_ratio):
+                    # The blank ended the table; this line is non-table
+                    # content and is skipped.
+                    tables.append(current_table)
+                    current_table = None
+                    current_cols = None
+                    continue
 
             cells = slice_row(line, current_cols)
             if is_continuation_row(cells) and len(current_table["rows"]) > 1:
@@ -482,6 +564,39 @@ if __name__ == "__main__":
         action="store_true",
         help="Print header matches and derived column positions to stderr",
     )
+    parser.add_argument(
+        "--row-gaps",
+        nargs=2,
+        type=int,
+        metavar=("N", "M"),
+        default=[3, 3],
+        help=(
+            "Gaps shape test: keep table open after a blank if the"
+            " next line has at least N inter-word gaps of M or more"
+            " spaces (default: 3 3)"
+        ),
+    )
+    parser.add_argument(
+        "--no-row-gaps",
+        action="store_true",
+        help="Disable the gaps-based table row shape test",
+    )
+    parser.add_argument(
+        "--row-ratio",
+        type=float,
+        metavar="R",
+        default=0.30,
+        help=(
+            "Ratio shape test: keep table open after a blank if the"
+            " next line's interior whitespace fraction is at least R"
+            " (default: 0.30)"
+        ),
+    )
+    parser.add_argument(
+        "--no-row-ratio",
+        action="store_true",
+        help="Disable the ratio-based table row shape test",
+    )
     args = parser.parse_args()
 
     column_patterns = split_header_pattern(args.header_pattern)
@@ -499,6 +614,9 @@ if __name__ == "__main__":
     else:
         start_page, end_page = 1, None
 
+    row_gaps = None if args.no_row_gaps else tuple(args.row_gaps)
+    row_ratio = None if args.no_row_ratio else args.row_ratio
+
     text = run_pdftotext(args.pdf_file, start_page, end_page)
     tables, unmerged_count = parse_tables(
         text,
@@ -507,6 +625,8 @@ if __name__ == "__main__":
         merge_tables=args.merge_tables,
         page_break_pattern=page_break_pattern,
         start_page=start_page,
+        row_gaps=row_gaps,
+        row_ratio=row_ratio,
         debug=args.debug,
     )
 
