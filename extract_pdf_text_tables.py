@@ -360,13 +360,14 @@ def parse_tables(
             column positions to stderr.
 
     Returns:
-        tuple: (tables, unmerged_count) where tables is a list of
+        tuple: (tables, unmerged_tables) where tables is a list of
             table dicts with keys 'page' and 'rows', and
-            unmerged_count is the number of tables that could not
-            be merged due to missing header on continuation page.
+            unmerged_tables is a list of dicts describing the
+            tables that could not be merged due to a missing
+            header on the continuation page.
     """
     tables = []
-    unmerged_count = 0
+    unmerged_tables = []
     current_table = None
     current_cols = None
     buffered_blank = False
@@ -414,10 +415,15 @@ def parse_tables(
                     # continuation: output the table as-is without
                     # merging.
                     tables.append(current_table)
+                    unmerged_tables.append(
+                        {
+                            "table": len(tables),
+                            "page": current_table["page"],
+                        },
+                    )
                     current_table = None
                     current_cols = None
                     buffered_blank = False
-                    unmerged_count += 1
         else:
             skipping_page_break = False
 
@@ -486,7 +492,7 @@ def parse_tables(
     if current_table is not None:
         tables.append(current_table)
 
-    return tables, unmerged_count
+    return tables, unmerged_tables
 
 
 def write_tables(tables, output):
@@ -618,7 +624,7 @@ if __name__ == "__main__":
     row_ratio = None if args.no_row_ratio else args.row_ratio
 
     text = run_pdftotext(args.pdf_file, start_page, end_page)
-    tables, unmerged_count = parse_tables(
+    tables, unmerged_tables = parse_tables(
         text,
         header_pattern=header_pattern,
         end_pattern=end_pattern,
@@ -641,19 +647,31 @@ if __name__ == "__main__":
             encoding="utf-8",
         ) as f:
             write_tables(tables, f)
+        print(file=sys.stderr)
         print(
             f"Extracted {len(tables)} table(s) to {args.output}",
             file=sys.stderr,
         )
     else:
         write_tables(tables, sys.stdout)
+        print(file=sys.stderr)
         print(
             f"Extracted {len(tables)} table(s)",
             file=sys.stderr,
         )
-    if unmerged_count:
+    if unmerged_tables:
+        failed_tables = "\n".join(
+            (
+                f"- table {table['table']} (starts on page"
+                f" {table['page']})"
+            )
+            for table in unmerged_tables
+        )
         print(
-            f"Warning: {unmerged_count} table(s) could not be merged"
-            " (no header found on continuation page).",
+            (
+                f"Warning: {len(unmerged_tables)} table(s) could not"
+                " be merged (no header found on continuation page):\n"
+                f"{failed_tables}"
+            ),
             file=sys.stderr,
         )
