@@ -23,8 +23,10 @@ Arguments:
         comma-separated key=value pairs.
         Example: -s snap_x_tolerance=5,join_x_tolerance=3
     -o, --output: Output file path. If omitted, writes to stdout.
-    -d, --debug: Print header-variant summary to stderr at the
-        end of the run.
+    -d, --debug: Print one line per raw extracted table to stderr
+        at the end of the run, showing raw table number, page, and
+        first row. Repeat as -dd to also print grouped first-row
+        statistics.
 
 Known limitations:
     Column boundary x-drift: pdfplumber infers column positions
@@ -211,12 +213,33 @@ def extract_tables(pdf, start_page, end_page, table_settings=None):
     return tables
 
 
-def report_header_variants(tables, output):
-    """Write a summary of distinct header rows to a file object.
+def report_raw_table_starts(tables, output):
+    """Write one debug line per raw extracted table.
 
-    Groups tables by header row and writes one line per variant to
+    Shows the 1-based raw table index, page number, and first row of
+    each table.
+
+    Args:
+        tables: List of table dicts from ``extract_tables()``.
+        output: File object to write to.
+    """
+    output.write("[debug] Raw tables:\n")
+    for i, table in enumerate(tables):
+        first_row = [clean_cell(cell) for cell in table["rows"][0]]
+        cells = ", ".join(repr(cell) for cell in first_row)
+        output.write(
+            f"[debug]   table {i + 1} page {table['page']}: "
+            f"{len(first_row)} cols [{cells}]\n"
+        )
+
+
+def report_first_row_variants(tables, output):
+    """Write a summary of distinct first rows to a file object.
+
+    Groups tables by first row and writes one line per variant to
     output. The largest group is shown with its count only; smaller
-    groups also list the 1-based table indexes that carry that header.
+    groups also list the 1-based table indexes and page numbers that
+    carry that first row.
 
     Args:
         tables: List of table dicts from ``extract_tables()``.
@@ -224,22 +247,25 @@ def report_header_variants(tables, output):
     """
     groups = {}
     for i, table in enumerate(tables):
-        header = tuple(clean_cell(cell) for cell in table["rows"][0])
-        if not header:
+        first_row = tuple(clean_cell(cell) for cell in table["rows"][0])
+        if not first_row:
             continue
-        groups.setdefault(header, []).append(i + 1)
+        groups.setdefault(first_row, []).append((i + 1, table["page"]))
 
-    # Sort by group size descending; ties broken by header tuple
+    # Sort by group size descending; ties broken by first-row tuple
     ordered = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
 
-    output.write("[debug] Header variants:\n")
-    for rank, (header, indexes) in enumerate(ordered):
-        cells = ", ".join(repr(cell) for cell in header)
-        prefix = f"[debug]   {len(header)} cols [{cells}]: "
+    output.write("[debug] First-row variants:\n")
+    for rank, (first_row, indexes) in enumerate(ordered):
+        cells = ", ".join(repr(cell) for cell in first_row)
+        prefix = f"[debug]   {len(first_row)} cols [{cells}]: "
         if rank == 0:
             output.write(f"{prefix}{len(indexes)} tables\n")
         else:
-            joined = ", ".join(str(i) for i in indexes)
+            joined = ", ".join(
+                f"{table_index} (page {page_num})"
+                for table_index, page_num in indexes
+            )
             output.write(f"{prefix}tables {joined}\n")
 
 
@@ -304,8 +330,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--debug",
         "-d",
-        action="store_true",
-        help="Print header-variant summary to stderr at the end of the run",
+        action="count",
+        default=0,
+        help=(
+            "Print raw-table debug output to stderr; repeat as"
+            " -dd to also print grouped first-row statistics"
+        ),
     )
     args = parser.parse_args()
 
@@ -360,5 +390,7 @@ if __name__ == "__main__":
             file=sys.stderr,
         )
 
-    if args.debug:
-        report_header_variants(raw_tables, sys.stderr)
+    if args.debug >= 1:
+        report_raw_table_starts(raw_tables, sys.stderr)
+    if args.debug >= 2:
+        report_first_row_variants(raw_tables, sys.stderr)
