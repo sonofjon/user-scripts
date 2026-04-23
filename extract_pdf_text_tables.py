@@ -5,6 +5,10 @@ lines and slicing subsequent data rows at header-derived character-column
 positions. All tables in the PDF must have the same column names and order,
 as a single --header-pattern identifies all table headers.
 
+Each page is processed independently. Tables that split across a page
+boundary are truncated at the page break; continuation rows on the next
+page are lost.
+
 pdftotext -layout sometimes emits blank lines within a table (e.g. when a
 row has an empty second line). Since a blank line normally ends the current
 table, these would cause the remaining rows to be silently dropped. To avoid
@@ -18,7 +22,6 @@ Usage:
     python extract_pdf_text_tables.py <pdf_file>
         --header-pattern COL1,COL2,...
         [-p PAGES] [--end-pattern REGEX]
-        [-m] [--page-break-pattern REGEX]
         [-o FILE] [-d]
         [--row-gaps N M] [--no-row-gaps]
         [--row-ratio R] [--no-row-ratio]
@@ -40,14 +43,6 @@ Arguments:
         Omit to extract all pages.
     --end-pattern: Optional regex. A line matching this
         regex ends the current table.
-    -m, --merge-tables: Merge tables that are split across page
-        boundaries. Lines matching --page-break-pattern are
-        skipped, then the continuation page is pre-scanned for
-        its first table header, whose column positions are used
-        for the continuation rows.
-    --page-break-pattern: Regex matching lines to skip after a
-        page break (e.g. page numbers, running headers). Only
-        used when --merge-tables is set.
     -o, --output: Output file path. If omitted, writes to
         stdout.
     -d, --debug: Print header matches and derived column
@@ -65,15 +60,6 @@ Arguments:
         trailing whitespace stripped) that are spaces is at least R.
         Use --no-row-ratio to disable. (default: 0.30)
     --no-row-ratio: Disable the ratio-based table row shape test.
-
-Known limitations:
-    1. When --merge-tables is used, column positions for continuation rows
-       are inferred from the first header found on the continuation page,
-       which belongs to a different table. Since pdftotext may render
-       different tables at different character positions, the inferred
-       positions may not match the continuation rows, causing values to be
-       cut at wrong column boundaries and possibly end up in the wrong
-       cells, wholly or partially.
 """
 
 import argparse
@@ -323,8 +309,6 @@ def parse_tables(
     text,
     header_pattern,
     end_pattern=None,
-    merge_tables=False,
-    page_break_pattern=None,
     start_page=1,
     row_gaps=(3, 3),
     row_ratio=0.30,
@@ -335,23 +319,20 @@ def parse_tables(
     Scans the text line by line. A match against ``header_pattern`` starts a
     new table and defines its column starts. Subsequent lines become data
     rows, sliced at those column starts. A table ends at the next header
-    match, at a line matching ``end_pattern``, or (when ``merge_tables`` is
-    False) at a page break. When a blank line is encountered inside a table,
-    it is buffered and the next non-blank line is tested with
-    ``_looks_like_table_row``. If the test passes the blank is skipped and
-    the table continues; otherwise the blank closes the table.
+    match, at a line matching ``end_pattern``, or at a page break. When a
+    blank line is encountered inside a table, it is buffered and the next
+    non-blank line is tested with ``_looks_like_table_row``. If the test
+    passes the blank is skipped and the table continues; otherwise the blank
+    closes the table.
+
+    Each page is processed independently. A table open at a page break is
+    closed; continuation rows on the next page are lost.
 
     Args:
         text: Output of pdftotext -layout.
         header_pattern: Compiled regex. A ``search`` match marks
             a header line.
         end_pattern: Optional compiled regex ending the table.
-        merge_tables: If True, tables split across page
-            boundaries are merged after skipping lines matched
-            by ``page_break_pattern``.
-        page_break_pattern: Optional compiled regex; lines
-            matching it are skipped after a page break. Only
-            applied when ``merge_tables`` is True.
         start_page: 1-based page number of the first page.
         row_gaps: Tuple (min_gaps, min_gap_len) for the gaps
             shape test, or None to disable it.
@@ -361,14 +342,14 @@ def parse_tables(
             column positions to stderr.
 
     Returns:
-        tuple: (tables, unmerged_tables) where tables is a list of
+        tuple: (tables, truncated_tables) where tables is a list of
             table dicts with keys 'page' and 'rows', and
-            unmerged_tables is a list of dicts describing the
-            tables that could not be merged due to a missing
-            header on the continuation page.
+            truncated_tables is a list of dicts with keys 'table'
+            (1-based index) and 'page' (page the table started on)
+            for each table closed at a page break.
     """
     tables = []
-    unmerged_tables = []
+    truncated_tables = []
     current_table = None
     current_cols = None
     buffered_blank = False
@@ -381,63 +362,16 @@ def parse_tables(
     for page_offset, page_text in enumerate(pages):
         page_num = start_page + page_offset
         lines = page_text.split("\n")
-        # On a continuation page, end the current table when
-        # merging is disabled. When merging, skip lines matching
-        # page_break_pattern until the first line that looks like
-        # data.
-        if page_offset > 0:
-            if not merge_tables and current_table is not None:
-                tables.append(current_table)
-                current_table = None
-                current_cols = None
-                buffered_blank = False
-            skipping_page_break = merge_tables
-            if merge_tables and current_table is not None:
-                # Column positions can change between pages. Pre-scan
-                # this continuation page for its first header and use
-                # those positions for all data on this page, including
-                # the continuation rows that precede the header.
-                header_found = False
-                for scan_line in lines:
-                    scan_match = header_pattern.search(scan_line)
-                    if scan_match:
-                        current_cols = find_columns(scan_match)
-                        header_found = True
-                        if debug:
-                            print(
-                                f"[debug] pre-scan updated columns on"
-                                f" page {page_num} to"
-                                f" {current_cols}",
-                                file=sys.stderr,
-                            )
-                        break
-                if not header_found:
-                    # Cannot determine column positions for the
-                    # continuation: output the table as-is without
-                    # merging.
-                    tables.append(current_table)
-                    unmerged_tables.append(
-                        {
-                            "table": len(tables),
-                            "page": current_table["page"],
-                        },
-                    )
-                    current_table = None
-                    current_cols = None
-                    buffered_blank = False
-        else:
-            skipping_page_break = False
+        if page_offset > 0 and current_table is not None:
+            tables.append(current_table)
+            truncated_tables.append(
+                {"table": len(tables), "page": current_table["page"]}
+            )
+            current_table = None
+            current_cols = None
+            buffered_blank = False
 
         for line in lines:
-            if skipping_page_break:
-                if is_blank_line(line):
-                    continue
-                if (
-                    page_break_pattern is not None
-                    and page_break_pattern.search(line)
-                ):
-                    continue
-                skipping_page_break = False
 
             match = header_pattern.search(line)
             if match:
@@ -493,7 +427,7 @@ def parse_tables(
     if current_table is not None:
         tables.append(current_table)
 
-    return tables, unmerged_tables
+    return tables, truncated_tables
 
 
 def write_tables(tables, output):
@@ -541,25 +475,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--end-pattern",
         help="Regex; a line matching it ends the current table",
-    )
-    parser.add_argument(
-        "--merge-tables",
-        "-m",
-        action="store_true",
-        help=(
-            "Merge tables that are split across page"
-            " boundaries. Lines matching --page-break-pattern"
-            " are skipped, then the continuation page is"
-            " pre-scanned for its first table header, whose"
-            " column positions are used for the continuation rows"
-        ),
-    )
-    parser.add_argument(
-        "--page-break-pattern",
-        help=(
-            "Regex; matching lines after a page break are"
-            " skipped. Requires --merge-tables"
-        ),
     )
     parser.add_argument(
         "--output",
@@ -611,11 +526,6 @@ if __name__ == "__main__":
     header_pattern = build_header_regex(column_patterns)
 
     end_pattern = re.compile(args.end_pattern) if args.end_pattern else None
-    page_break_pattern = (
-        re.compile(args.page_break_pattern)
-        if args.page_break_pattern
-        else None
-    )
 
     if args.pages:
         start_page, end_page = parse_page_range(args.pages)
@@ -626,12 +536,10 @@ if __name__ == "__main__":
     row_ratio = None if args.no_row_ratio else args.row_ratio
 
     text = run_pdftotext(args.pdf_file, start_page, end_page)
-    tables, unmerged_tables = parse_tables(
+    tables, truncated_tables = parse_tables(
         text,
         header_pattern=header_pattern,
         end_pattern=end_pattern,
-        merge_tables=args.merge_tables,
-        page_break_pattern=page_break_pattern,
         start_page=start_page,
         row_gaps=row_gaps,
         row_ratio=row_ratio,
@@ -661,19 +569,14 @@ if __name__ == "__main__":
             f"Extracted {len(tables)} table(s)",
             file=sys.stderr,
         )
-    if unmerged_tables:
-        failed_tables = "\n".join(
-            (
-                f"- table {table['table']} (starts on page"
-                f" {table['page']})"
-            )
-            for table in unmerged_tables
+
+    if truncated_tables:
+        truncated_list = "\n".join(
+            f"- table {t['table']} (starts on page {t['page']})"
+            for t in truncated_tables
         )
         print(
-            (
-                f"Warning: {len(unmerged_tables)} table(s) could not"
-                " be merged (no header found on continuation page):\n"
-                f"{failed_tables}"
-            ),
+            f"Warning: {len(truncated_tables)} table(s) truncated at"
+            f" page break (continuation rows lost):\n{truncated_list}",
             file=sys.stderr,
         )
