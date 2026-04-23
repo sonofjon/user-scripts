@@ -42,8 +42,9 @@ Arguments:
         regex ends the current table.
     -m, --merge-tables: Merge tables that are split across page
         boundaries. Lines matching --page-break-pattern are
-        skipped, then the previous page's column positions are
-        reused on the continuation page.
+        skipped, then the continuation page is pre-scanned for
+        its first table header, whose column positions are used
+        for the continuation rows.
     --page-break-pattern: Regex matching lines to skip after a
         page break (e.g. page numbers, running headers). Only
         used when --merge-tables is set.
@@ -548,8 +549,9 @@ if __name__ == "__main__":
         help=(
             "Merge tables that are split across page"
             " boundaries. Lines matching --page-break-pattern"
-            " are skipped, then the previous page's column"
-            " positions are reused on the continuation page"
+            " are skipped, then the continuation page is"
+            " pre-scanned for its first table header, whose"
+            " column positions are used for the continuation rows"
         ),
     )
     parser.add_argument(
