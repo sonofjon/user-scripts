@@ -25,6 +25,32 @@ Arguments:
     -o, --output: Output file path. If omitted, writes to stdout.
     -d, --debug: Print header-variant summary to stderr at the
         end of the run.
+
+Known limitations:
+    Column boundary x-drift: pdfplumber infers column positions
+    from vertical line segments whose x-coordinates can vary
+    slightly between pages and even within a single table. No
+    single snap_x_tolerance value corrects all tables; tuning it
+    is a global trade-off with diminishing returns.
+
+    Garbled headers: When x-drift exceeds the snap tolerance,
+    pdfplumber splits words across wrong column boundaries (e.g.
+    "Typ" and "Storlek" become "Typ S" and "torlek S"). The
+    resulting header does not match the canonical form, so
+    --merge-tables silently absorbs the affected sub-table into
+    its predecessor, losing the boundary between logical tables.
+
+    Text-based column detection (vertical_strategy=text) is not
+    a reliable fix: it fragments tables more aggressively due to
+    character spacing jitter, and its tuning knobs (text_x_tolerance,
+    min_words_vertical) have the same cross-page variance problem.
+    In particular, min_words_vertical must be no greater than the
+    row count of the smallest table, which constrains how much
+    spurious boundary filtering is possible.
+
+    For PDFs with a fixed-width columnar layout, parsing the output
+    of pdftotext -layout with column-position rules may be more
+    reliable than geometric table extraction.
 """
 
 import argparse
