@@ -4,6 +4,10 @@ Reads pages, extracts tables with borders, and writes each table
 to stdout in CSV format separated by a blank line and a table
 header comment.
 
+When pdfplumber finds a table region but infers the wrong internal cell
+boundaries for that table, the script can locally rebuild the rows from the
+positions of words extracted from inside that table's bounding box.
+
 Usage:
     pip install pdfplumber
     python extract_pdf_tables.py <pdf_file> [-p PAGES] [-m]
@@ -57,6 +61,7 @@ Known limitations:
 
 import argparse
 import csv
+import re
 import sys
 from pathlib import Path
 
@@ -138,6 +143,185 @@ def clean_cell(cell):
     return cell.strip() if cell else ""
 
 
+def normalize_row_text(values):
+    """Return row text with internal whitespace collapsed.
+
+    Args:
+        values: Iterable of cell or word strings.
+
+    Returns:
+        str: Normalized row text.
+    """
+    text = " ".join(clean_cell(value) for value in values if clean_cell(value))
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def get_text_tolerances(table_settings):
+    """Return text extraction tolerances for word grouping.
+
+    Args:
+        table_settings: Optional dict of pdfplumber table settings.
+
+    Returns:
+        tuple: ``(x_tolerance, y_tolerance)`` for ``extract_words()``.
+    """
+    if not table_settings:
+        return 3, 3
+
+    text_tolerance = table_settings.get("text_tolerance", 3)
+    x_tolerance = table_settings.get("text_x_tolerance", text_tolerance)
+    y_tolerance = table_settings.get("text_y_tolerance", text_tolerance)
+    return x_tolerance, y_tolerance
+
+
+def extract_word_lines(page, bbox, table_settings):
+    """Return words from bbox grouped into visual lines.
+
+    Args:
+        page: A pdfplumber page.
+        bbox: Table bounding box as ``(x0, top, x1, bottom)``.
+        table_settings: Optional dict of pdfplumber table settings.
+
+    Returns:
+        list: List of lines, each a list of word dicts ordered by x.
+    """
+    x_tolerance, y_tolerance = get_text_tolerances(table_settings)
+    cropped_page = page.crop(bbox)
+    words = cropped_page.extract_words(
+        x_tolerance=x_tolerance,
+        y_tolerance=y_tolerance,
+        keep_blank_chars=False,
+    )
+
+    lines = []
+    for word in sorted(words, key=lambda item: (item["top"], item["x0"])):
+        if not lines:
+            lines.append(
+                {
+                    "top": word["top"],
+                    "words": [word],
+                },
+            )
+            continue
+        if abs(lines[-1]["top"] - word["top"]) <= y_tolerance:
+            lines[-1]["words"].append(word)
+        else:
+            lines.append(
+                {
+                    "top": word["top"],
+                    "words": [word],
+                },
+            )
+
+    return [
+        sorted(line["words"], key=lambda item: item["x0"])
+        for line in lines
+    ]
+
+
+def build_row_from_words(words, col_starts):
+    """Return one row by assigning words to column intervals.
+
+    Args:
+        words: List of word dicts sorted by x position.
+        col_starts: Ordered list of column start x positions.
+
+    Returns:
+        list: Row cells as strings.
+    """
+    row = [""] * len(col_starts)
+    for word in words:
+        col_index = len(col_starts) - 1
+        for i in range(len(col_starts) - 1):
+            if word["x0"] < col_starts[i + 1]:
+                col_index = i
+                break
+        text = clean_cell(word["text"])
+        if not text:
+            continue
+        if row[col_index]:
+            row[col_index] = f"{row[col_index]} {text}"
+        else:
+            row[col_index] = text
+    return row
+
+
+def merge_rebuilt_rows(rows):
+    """Merge wrapped continuation lines into the previous rebuilt row.
+
+    Args:
+        rows: List of rebuilt rows.
+
+    Returns:
+        list: Rebuilt rows with continuation lines merged.
+    """
+    merged = []
+    for row in rows:
+        non_empty_indexes = [i for i, cell in enumerate(row) if cell]
+        if merged and non_empty_indexes and non_empty_indexes[0] > 0:
+            for i in non_empty_indexes:
+                if merged[-1][i]:
+                    merged[-1][i] = f"{merged[-1][i]}\n{row[i]}"
+                else:
+                    merged[-1][i] = row[i]
+        else:
+            merged.append(row)
+    return [row for row in merged if any(cell for cell in row)]
+
+
+def rebuild_table_rows_from_text(page, bbox, rows, table_settings):
+    """Return repaired rows when the raw cell grid disagrees with text.
+
+    Args:
+        page: A pdfplumber page.
+        bbox: Table bounding box as ``(x0, top, x1, bottom)``.
+        rows: Raw table rows returned by pdfplumber.
+        table_settings: Optional dict of pdfplumber table settings.
+
+    Returns:
+        list: Rebuilt rows when the fallback improves the first row;
+            otherwise the original rows.
+    """
+    rebuilt_rows = rows
+    if not rows:
+        return rebuilt_rows
+
+    word_lines = extract_word_lines(page, bbox, table_settings)
+    if not word_lines:
+        return rebuilt_rows
+
+    template_words = word_lines[0]
+    template_texts = [clean_cell(word["text"]) for word in template_words]
+    template_texts = [text for text in template_texts if text]
+    if not template_texts:
+        return rebuilt_rows
+
+    first_row = [clean_cell(cell) for cell in rows[0]]
+    row_matches_template = (
+        len(first_row) == len(template_texts)
+        and normalize_row_text(first_row) == normalize_row_text(
+            template_texts,
+        )
+    )
+    if not row_matches_template:
+        col_starts = [word["x0"] for word in template_words]
+        candidate_rows = [
+            build_row_from_words(words, col_starts)
+            for words in word_lines
+        ]
+        candidate_rows = merge_rebuilt_rows(candidate_rows)
+        if candidate_rows:
+            rebuilt_first = [clean_cell(cell) for cell in candidate_rows[0]]
+            rebuilt_matches_template = (
+                len(rebuilt_first) == len(template_texts)
+                and normalize_row_text(rebuilt_first)
+                == normalize_row_text(template_texts)
+            )
+            if rebuilt_matches_template:
+                rebuilt_rows = candidate_rows
+    return rebuilt_rows
+
+
 def merge_split_tables(tables):
     """Merge tables that are split across page boundaries.
 
@@ -179,36 +363,45 @@ def merge_split_tables(tables):
 
 
 def extract_tables(pdf, start_page, end_page, table_settings=None):
-    """Extract tables using pdfplumber's ``extract_tables()``.
+    """Extract tables using pdfplumber's ``find_tables()``.
 
     Args:
         pdf: An open pdfplumber.PDF object.
         start_page: First page to extract (1-based, inclusive).
         end_page: Last page to extract (1-based, inclusive).
         table_settings: Optional dict of pdfplumber table
-            settings passed to ``extract_tables()``.
+            settings passed to ``find_tables()``.
 
     Returns:
         list: List of dicts, each with keys 'page' (1-based page
-            number) and 'rows' (list of lists of cell values).
+            number), 'bbox' (table bounding box), and 'rows' (list of
+            lists of cell values).
     """
     tables = []
     for page_num in range(start_page, end_page + 1):
         page = pdf.pages[page_num - 1]
-        page_tables = page.extract_tables(table_settings)
+        page_tables = page.find_tables(table_settings)
         for table in page_tables:
+            rows = table.extract()
             # Filter out empty rows
             rows = [
                 row
-                for row in table
+                for row in rows
                 if any(cell and cell.strip() for cell in row)
             ]
             if rows:
+                rows = rebuild_table_rows_from_text(
+                    page,
+                    table.bbox,
+                    rows,
+                    table_settings,
+                )
                 tables.append(
                     {
                         "page": page_num,
+                        "bbox": table.bbox,
                         "rows": rows,
-                    }
+                    },
                 )
     return tables
 
@@ -229,7 +422,7 @@ def report_raw_table_starts(tables, output):
         cells = ", ".join(repr(cell) for cell in first_row)
         output.write(
             f"[debug]   table {i + 1} page {table['page']}: "
-            f"{len(first_row)} cols [{cells}]\n"
+            f"{len(first_row)} cols [{cells}]\n",
         )
 
 
