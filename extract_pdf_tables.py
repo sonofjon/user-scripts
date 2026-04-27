@@ -1,12 +1,17 @@
 """Extract tables from a PDF file using pdfplumber.
 
-Reads pages, extracts tables with borders, and writes each table
-to stdout in CSV format separated by a blank line and a table
-header comment.
+Reads pages, extracts tables, and writes each table to stdout in CSV format
+separated by a blank line and a comment line.
 
-When pdfplumber finds a table region but infers the wrong internal cell
-boundaries for that table, the script can locally rebuild the rows from the
-positions of words extracted from inside that table's bounding box.
+A table in the PDF may span multiple pages, in which case only the first
+page carries the header row; subsequent pages (continuation pages) contain
+data rows without repeating the header. The script handles this by ensuring
+that all pages of a split table use the same column layout, derived from the
+header row.
+
+If pdfplumber infers the wrong cell boundaries for a table region, the
+script can locally rebuild rows from the positions of words extracted inside
+the table's bounding box.
 
 Usage:
     pip install pdfplumber
@@ -219,6 +224,25 @@ def extract_word_lines(page, bbox, table_settings):
     ]
 
 
+def get_col_starts(page, bbox, table_settings):
+    """Return column start x-positions from the first text line in bbox.
+
+    Args:
+        page: A pdfplumber page.
+        bbox: Table bounding box as ``(x0, top, x1, bottom)``.
+        table_settings: Optional dict of pdfplumber table settings.
+
+    Returns:
+        list: Ordered x-positions of column starts derived from the
+            first visible text line, or an empty list if no words are
+            found in bbox.
+    """
+    word_lines = extract_word_lines(page, bbox, table_settings)
+    if not word_lines:
+        return []
+    return [word["x0"] for word in word_lines[0]]
+
+
 def build_row_from_words(words, col_starts):
     """Return one row by assigning words to column intervals.
 
@@ -269,13 +293,50 @@ def merge_rebuilt_rows(rows):
     return [row for row in merged if any(cell for cell in row)]
 
 
-def rebuild_table_rows_from_text(page, bbox, rows, table_settings):
+def rebuild_rows_from_words(page, bbox, rows, col_starts, table_settings):
+    """Return rows rebuilt by assigning words to column intervals.
+
+    Rebuilds all rows unconditionally using the given column positions.
+    Use when the correct column layout is already known, such as when
+    rebuilding continuation pages using column positions carried forward
+    from a previous header page.
+
+    Args:
+        page: A pdfplumber page.
+        bbox: Table bounding box as ``(x0, top, x1, bottom)``.
+        rows: Raw table rows, returned unchanged if no words are found.
+        col_starts: Ordered list of column start x-positions.
+        table_settings: Optional dict of pdfplumber table settings.
+
+    Returns:
+        list: Rebuilt rows, or the original rows if no words are found
+            in bbox or the rebuild yields no rows.
+    """
+    word_lines = extract_word_lines(page, bbox, table_settings)
+    if not word_lines:
+        return rows
+    candidate_rows = [
+        build_row_from_words(words, col_starts)
+        for words in word_lines
+    ]
+    candidate_rows = merge_rebuilt_rows(candidate_rows)
+    return candidate_rows if candidate_rows else rows
+
+
+def rebuild_table_rows_from_text(page, bbox, rows, col_starts,
+                                 table_settings):
     """Return repaired rows when the raw cell grid disagrees with text.
+
+    Compares the first raw row against the first visible text line in
+    bbox. Rebuilds using col_starts only when they disagree, and keeps
+    the result only if its first row matches the first text line.
 
     Args:
         page: A pdfplumber page.
         bbox: Table bounding box as ``(x0, top, x1, bottom)``.
         rows: Raw table rows returned by pdfplumber.
+        col_starts: Ordered list of column start x-positions to use
+            when rebuilding.
         table_settings: Optional dict of pdfplumber table settings.
 
     Returns:
@@ -304,7 +365,8 @@ def rebuild_table_rows_from_text(page, bbox, rows, table_settings):
         )
     )
     if not row_matches_template:
-        col_starts = [word["x0"] for word in template_words]
+        if not col_starts:
+            return rebuilt_rows
         candidate_rows = [
             build_row_from_words(words, col_starts)
             for words in word_lines
@@ -378,6 +440,8 @@ def extract_tables(pdf, start_page, end_page, table_settings=None):
             lists of cell values).
     """
     tables = []
+    last_col_starts = []
+    last_header_text = None
     for page_num in range(start_page, end_page + 1):
         page = pdf.pages[page_num - 1]
         page_tables = page.find_tables(table_settings)
@@ -390,12 +454,33 @@ def extract_tables(pdf, start_page, end_page, table_settings=None):
                 if any(cell and cell.strip() for cell in row)
             ]
             if rows:
-                rows = rebuild_table_rows_from_text(
-                    page,
-                    table.bbox,
-                    rows,
-                    table_settings,
+                first_row_text = normalize_row_text(rows[0])
+                is_continuation = (
+                    last_header_text is not None
+                    and first_row_text != last_header_text
                 )
+                if is_continuation and last_col_starts:
+                    rows = rebuild_rows_from_words(
+                        page,
+                        table.bbox,
+                        rows,
+                        last_col_starts,
+                        table_settings,
+                    )
+                else:
+                    col_starts = get_col_starts(
+                        page, table.bbox, table_settings,
+                    )
+                    if col_starts:
+                        last_col_starts = col_starts
+                        last_header_text = first_row_text
+                    rows = rebuild_table_rows_from_text(
+                        page,
+                        table.bbox,
+                        rows,
+                        col_starts,
+                        table_settings,
+                    )
                 tables.append(
                     {
                         "page": page_num,
